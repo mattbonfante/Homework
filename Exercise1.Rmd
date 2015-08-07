@@ -1,0 +1,427 @@
+---
+title: "Exercise1"
+author: "Bonfante"
+date: "August 6, 2015"
+output: word_document
+---
+
+#(1)Explanatory Analysis
+
+##Does using certain kinds of voting equipment lead to higher rates of undercount?
+
+Read in data and create new column for the amount of undercounted votes
+```{r}
+votes = read.csv('georgia2000.csv', header = TRUE)
+summary(votes)
+
+votes$undercount = votes$ballots - votes$votes
+summary(votes$undercount)
+```
+
+
+Boxplot Undercount against equipment. Lever and Paper are extremely accurate, while optical and punch are less reliable
+```{r}
+boxplot(undercount~equip, data = votes)
+lm.fit = glm(undercount~equip, data = votes)
+summary(lm.fit)
+```
+
+##If so, should we worry that this effect has a disparate impact on poor and minority communities?
+
+Xtab and Boxplot show that the poor have on average less undercounting and the large outliers pertain to the rich.
+```{r}
+x1 = xtabs(~undercount + poor, data = votes)
+x1
+boxplot(undercount~poor, data = votes)
+```
+
+
+We can also see that the rich use the undercounted equipment much more frequently than the poor people.
+```{r}
+x2 = xtabs(~equip + poor, data = votes)
+p1 = prop.table(x2, margin =1)
+p1
+```
+
+plotting Undercount against Percent AA shows little correlation, but a few large ouliers can be seen in higher AA populations.
+```{r}
+plot(undercount~perAA, data = votes)
+
+x = glm(undercount~perAA, data = votes)
+summary(x)
+```
+
+##Conclusion
+
+In conclusion it is not the poor population that is discriminated against but rather the rich population.  When looking at the AA population there is very little correlation to undercounting other than a few outliers.
+
+
+
+#(2)Bootstrapping
+
+##Analyze the 5 ETFs
+Import the ETFs and view the first 5 rows
+```{r}
+library(mosaic)
+library(fImport)
+library(foreach)
+
+#Import stocks
+stocks = c("SPY", "TLT", "LQD", "EEM", "VNQ")
+prices = yahooSeries(stocks, from='2011-01-01', to='2015-08-05')
+
+# The first few rows
+head(prices)
+```
+
+Creat a function to calculate daily returns of each ETF and then compute the returns
+```{r}
+YahooPricesToReturns = function(series) {
+	mycols = grep('Adj.Close', colnames(series))
+	closingprice = series[,mycols]
+	N = nrow(closingprice)
+	percentreturn = as.data.frame(closingprice[2:N,]) / as.data.frame(closingprice[1:(N-1),]) - 1
+	mynames = strsplit(colnames(percentreturn), '.', fixed=TRUE)
+	mynames = lapply(mynames, function(x) return(paste0(x[1], ".PctReturn")))
+	colnames(percentreturn) = mynames
+	as.matrix(na.omit(percentreturn))
+}
+
+
+returns = YahooPricesToReturns(prices)
+```
+
+
+Plot the Returns
+```{r}
+pairs(returns)
+plot(returns[,1], type='l')
+```
+
+Calculate the betas of each stock determined against the market to see which investments are riskier
+```{r}
+lm_TLT = lm(returns[,2]~returns[,1])
+lm_LQD = lm(returns[,3]~returns[,1])
+lm_EEM = lm(returns[,4]~returns[,1])
+lm_VNQ = lm(returns[,5]~returns[,1])
+
+coef(lm_TLT); coef(lm_LQD); coef(lm_EEM); coef(lm_VNQ)
+```
+
+
+Look at the residuals and their correlations
+```{r}
+residuals = cbind(resid(lm_TLT), resid(lm_LQD), resid(lm_EEM), resid(lm_VNQ))
+
+cor(residuals)
+```
+
+##Evenly weighted Portfolio:
+
+Set the seed and simulate performance for the safe portfolio. Here the bonds are evenly weighted
+```{r}
+n_days=20
+set.seed(3000)
+
+sim1 = foreach(i=1:5000, .combine='rbind') %do% {
+	totalwealth = 100000
+	weights = c(0.2, 0.2, 0.2, 0.2, 0.2)
+	holdings = weights * totalwealth
+	wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+	for(today in 1:n_days) {
+		return.today = resample(returns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		totalwealth = sum(holdings)
+		holdings = weights * totalwealth
+		wealthtracker[today] = totalwealth
+	}
+	wealthtracker
+}
+```
+
+Show a selection of Sim1 and plot a histogram of the wealth over 20 days
+```{r}
+head(sim1)
+hist(sim1[,n_days])
+```
+
+plot a histogram showing profit/loss over the 20 days
+```{r}
+hist(sim1[,n_days]- 100000)
+```
+
+Calculate 5% value at risk
+```{r}
+quantile(sim1[,n_days], 0.05) - 100000
+```
+
+
+Show the average profit or loss
+```{r}
+mean(sim1[,n_days]- 100000)
+```
+
+##Safe Portfolio
+
+Set the seed and simulate performance for the safe portfolio. Here the bonds have been heavily weigted
+```{r}
+set.seed(4000)
+
+sim2 = foreach(i=1:5000, .combine='rbind') %do% {
+	totalwealth = 100000
+	weights = c(0.15, 0.3, 0.4, 0.0, 0.15)
+	holdings = weights * totalwealth
+	wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+	for(today in 1:n_days) {
+		return.today = resample(returns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		totalwealth = sum(holdings)
+		holdings = weights * totalwealth
+		wealthtracker[today] = totalwealth
+	}
+	wealthtracker
+}
+```
+
+Show a selection of Sim2 and plot a histogram of the wealth over 20 days
+```{r}
+head(sim2)
+hist(sim2[,n_days])
+```
+
+plot a histogram showing profit/loss over the 20 days
+```{r}
+hist(sim2[,n_days]- 100000)
+```
+
+Calculate 5% value at risk
+```{r}
+quantile(sim2[,n_days], 0.05) - 100000
+```
+
+Show the average profit or loss
+```{r}
+#Average Profit/Loss
+mean(sim2[,n_days]- 100000)
+```
+
+##Risky Portfolio
+
+Set the seed and simulate performance for the risky portfolio. Here the bonds have been excluded
+```{r}
+set.seed(2000)
+
+sim3 = foreach(i=1:5000, .combine='rbind') %do% {
+	totalwealth = 100000
+	weights = c(0.4, 0.0, 0.0, 0.4, 0.2)
+	holdings = weights * totalwealth
+	wealthtracker = rep(0, n_days) # Set up a placeholder to track total wealth
+	for(today in 1:n_days) {
+		return.today = resample(returns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		totalwealth = sum(holdings)
+		holdings = weights * totalwealth
+		wealthtracker[today] = totalwealth
+	}
+	wealthtracker
+}
+```
+
+
+Show a selection of Sim3 and plot a histogram of the wealth over 20 days
+```{r}
+head(sim3)
+hist(sim3[,n_days])
+```
+
+plot a histogram showing profit/loss over the 20 days
+```{r}
+hist(sim3[,n_days]- 100000)
+```
+
+Calculate 5% value at risk
+```{r}
+quantile(sim3[,n_days], 0.05) - 100000
+```
+
+Show the average profit or loss
+```{r}
+mean(sim3[,n_days]- 100000)
+```
+
+
+
+##Conclusion
+
+Ultimately the safe portfolio had the best average return and the least amount at stake. The risky portfoli had the worst return and the most money at stake.
+
+
+
+
+
+
+
+
+
+#(3)Clustering And PCA
+
+##Red Vs White Clustering
+
+Read in the data
+```{r}
+wine = read.csv('wine.csv')
+
+head(wine)
+names(wine)
+```
+
+
+Remove the last 2 columns and scale the data.
+```{r}
+wine_num = wine [,(1:11)]
+wine_scaled = scale(wine_num, center = TRUE, scale = TRUE)
+```
+
+
+cluster the data using 2 centers, in hopes of distinguishing red from white wine.
+```{r}
+cluster_2 = kmeans(wine_scaled, centers = 2, nstart = 50)
+```
+
+Capture the mean and SD of the scaled data.
+```{r}
+sigma = attr(wine_scaled,"scaled:scale")
+mu = attr(wine_scaled,"scaled:center")
+```
+
+Unscale the data.
+```{r}
+cluster_2$center
+cluster_2$center[1,]*sigma + mu
+cluster_2$center[2,]*sigma + mu
+```
+
+See which wines are in each cluster
+```{r}
+which(cluster_2$cluster == 1)
+which(cluster_2$cluster == 2)
+```
+
+Plots displaying cluster association
+```{r}
+qplot(volatile.acidity,sulphates, data=wine, color=factor(cluster_2$cluster))
+qplot(volatile.acidity, chlorides, data=wine, color=factor(cluster_2$cluster))
+qplot(color, quality, data=wine, color=factor(cluster_2$cluster))
+qplot(wine$color, cluster_2$cluster, data=wine, color=factor(cluster_2$cluster))
+```
+
+Table displaying that the clusters succesfully split red and white wine with minimal error
+```{r}
+table(wine$color,cluster_2$cluster)
+```
+
+##Quality Clustering
+
+Cluster the data into 3 groups
+```{r}
+cluster_3 = kmeans(wine_scaled, centers = 3, nstart = 50)
+table(wine$quality,cluster_3$cluster)
+qplot(color, quality, data=wine, color=factor(cluster_3$cluster),cex= 1.2)
+```
+It is dificult to distinguish the wines by quality.
+
+
+##PCA
+
+Run PCA on the data and look at the result
+```{r}
+pca_wine = prcomp(wine_num, scale.=TRUE)
+pca_wine
+```
+
+See some statistics and plots related to the PCA
+```{r}
+summary(pca_wine)
+sum((pca_wine$sdev)^2)
+plot(pca_wine)
+biplot(pca_wine)
+```
+
+By looking at the score and plotting them, we can again see the distinction from red and white wines
+```{r}
+scores = pca_wine$x
+head(scores)
+nrow(scores)
+qplot(scores[,1], scores[,2], color=wine$color, xlab='Component 1', ylab='Component 2')
+```
+
+Again when plotting to see quality, it is dificult to see any distinction.
+```{r}
+qplot(scores[,1], scores[,2], color=wine$quality, xlab='Component 1', ylab='Component 2')
+
+```
+
+In conclusion I beleive clustering is more useful in evaluating this data.  The plots formed from clustering claerly seperated red and white wines. Additionally by using the table function we were able to see that clustering distinguished between the wines with a high level of precision.
+
+
+#(4) Market Segmentation
+
+##K-Means clustering
+
+Read in the data
+```{r}
+twitter = read.csv('social_marketing.csv')
+
+head(twitter)
+names(twitter)
+```
+
+
+Remove the 1st and last 2 columns of the dataset and scale the data.
+```{r}
+twitter_num = twitter [,(2:35)]
+twitter_scaled = scale(twitter_num, center = TRUE, scale = TRUE)
+```
+
+
+cluster the data using 5 centers, in hopes of distinguishing market segments.
+```{r}
+cluster_twitter = kmeans(twitter_scaled, centers = 5, nstart = 200)
+```
+
+Capture the mean and SD of the scaled data.
+```{r}
+sigma_twitter = attr(twitter_scaled,"scaled:scale")
+mu_twitter = attr(twitter_scaled,"scaled:center")
+```
+
+Unscale the data.
+```{r}
+cluster_twitter$center
+cluster_twitter$center[1,]*sigma_twitter + mu_twitter
+cluster_twitter$center[2,]*sigma_twitter + mu_twitter
+```
+
+See attributes are emphasized in each cluster to facilitate targeting
+```{r}
+#Young women. Care about fashion, beauty, cooking, shopping, and photo sharing
+rbind(cluster_twitter$center[1,],cluster_twitter$center[1,]*sigma_twitter + mu_twitter)
+#Your classic young parent (sports, food, family, religion, and parenting)
+rbind(cluster_twitter$center[2,],cluster_twitter$center[2,]*sigma_twitter + mu_twitter)
+#Average No-desciptive cluster
+rbind(cluster_twitter$center[3,],cluster_twitter$center[3,]*sigma_twitter + mu_twitter)
+#Athletiic/Healthy Cluster (Nutrition, outdoors, and personal fitness)
+rbind(cluster_twitter$center[4,],cluster_twitter$center[4,]*sigma_twitter + mu_twitter)
+#worldly and current cluster (travel, politics, news, automotive, computers)
+rbind(cluster_twitter$center[5,],cluster_twitter$center[5,]*sigma_twitter + mu_twitter)
+```
+
+##Conclusion
+
+By using K-Menas clustering with 5 centers I was able to successfully group the twitter users into distinct groups. The clusters found were; Young women, Parents, Athletic people, contemporaries, and then a group that was relatively average accross all categories.  I think these clusters could provide useful marketing insights to NutrientH20.
+
+
+
+
+
+
